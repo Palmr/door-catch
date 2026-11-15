@@ -6,11 +6,15 @@
 //     simple pocket that widens upwards: it releases straight up with no split.
 //   - BASE: solid block holding all cavities. Parting plane = the flat bottom face
 //     of the rubber part, so the LID is just a flat plate (gives a clean flat face).
-//   - CORE PINS: the stud-shaped hole (funnel + shaft + mushroom head) is formed by
-//     a separate pin that slides up through the floor of each cavity and is held by
-//     a flange sitting flush in a counterbore underneath. To demould: lift the lid,
-//     push each pin up from below (it acts as an ejector), then peel the rubber off
-//     the pin - exactly the same action as the real stud pulling out of the catch.
+//   - EJECTOR CORE PIN: the stud-shaped hole (funnel + collar + neck + mushroom head)
+//     is formed by a separate pin. Its top is a plate the exact size of the lip face,
+//     so it forms the whole floor of the lip pocket. Below the plate is a narrower
+//     stem that runs to the underside of the base. The step between plate and stem
+//     sits on a ledge, so the pin cannot drop, but it can be pushed UP.
+//     A cross-dowel (cocktail stick / wire / printed pin) through the side of the
+//     base and the stem stops the pin floating while the rubber cures.
+//     To demould: lift the lid, pull the dowel, push the stem up from below - the
+//     part rises out of the cavity sitting on the pin - then peel it off by hand.
 //   - LID: one sprue (with funnel) + two vents per cavity, plus alignment pins.
 //     Either pour through the sprues, or overfill the open cavities and press the
 //     lid down so the excess bleeds out of the holes.
@@ -63,9 +67,17 @@ vent_dia         = 1.5;
 vent_inset       = 2.5; // Vent distance in from cavity edge
 
 integral_cores = false; // true = cores printed as part of the base (no pins)
-core_clearance = 0.08;  // Radial clearance of pin plug in floor hole
-core_flange    = 3.0;   // Flange overhang around the plug
-core_flange_t  = 2.5;   // Flange thickness (= counterbore depth)
+core_clearance = 0.08;  // Radial clearance of the pin in its hole in the base
+plate_t        = 3.0;   // Thickness of the lip-face plate on top of the pin
+stem_inset     = 2.0;   // Stem is this much smaller than the plate on each side (= ledge width)
+
+cross_pin_dia       = 2.0;  // MEASURE your dowel (cocktail stick / wire) and set this
+cross_pin_clearance = 0.2;  // Diametral clearance for the dowel
+cross_pin_z         = 2.5;  // Height of dowel centre above the base underside
+// Moves the hole in the pin DOWN relative to the hole in the base. A small positive
+// value (e.g. 0.1) makes the dowel press the pin down onto its ledge (good with a
+// slightly compressible wooden stick). 0 = holes line up exactly.
+cross_pin_preload   = 0.0;
 
 pry_slot_w = 10;
 pry_slot_d = 1.5;
@@ -99,6 +111,7 @@ echo(str("Draft per side - body W: ", draft_deg(w, h), " deg, body L: ", draft_d
 echo(str("Rubber rim at lip face (W, L): ",
          (lip_width  * draft_scale - (funnel_w + 2 * ball_spacing)) / 2, " mm, ",
          (lip_length * draft_scale - (funnel_l + 2 * ball_spacing)) / 2, " mm"));
+echo(str("Pin ledge width: ", stem_inset, " mm, wall left above/below dowel in stem: ", floor_t - plate_t - cross_pin_z - (cross_pin_dia + cross_pin_clearance)/2, " / ", cross_pin_z - cross_pin_preload - (cross_pin_dia + cross_pin_clearance)/2, " mm"));
 echo(str("Rubber floor under stud tip: ", total_h - (ball_shaft_length + ball_spacing), " mm"));
 echo(str("Mould footprint: ", box_w, " x ", box_l, " mm, base height ", base_h,
          " mm, lid ", lid_thickness, " mm"));
@@ -174,17 +187,28 @@ module part() {
 }
 
 // ---- Mould ----
-module plug_shape() {
-    offset(r = ball_spacing) rrect(funnel_w, funnel_l, detent_corner_radius);
+// Outline of the lip face (the narrow end of the lip pocket, on the cavity floor)
+module lip_face_shape() {
+    scale([draft_scale, draft_scale]) rrect(lip_width, lip_length, corner_radius);
+}
+module stem_shape() {
+    offset(delta = -stem_inset) lip_face_shape();
 }
 
-// Core pin, in the BASE frame of one cavity: z=floor_t is the cavity floor,
-// z=0 is the underside of the base.
+// Ejector core pin, in the BASE frame of one cavity: z=floor_t is the cavity
+// floor, z=0 is the underside of the base.
 module core_pin() {
-    translate([0, 0, floor_t]) ball_positive(ball_spacing);
-    translate([0, 0, core_flange_t - eps])
-        linear_extrude(height = floor_t - core_flange_t + 2 * eps) plug_shape();
-    linear_extrude(height = core_flange_t) offset(r = core_flange) plug_shape();
+    difference() {
+        union() {
+            translate([0, 0, floor_t - eps]) ball_positive(ball_spacing);
+            translate([0, 0, floor_t - plate_t])
+                linear_extrude(height = plate_t) lip_face_shape();
+            linear_extrude(height = floor_t - plate_t + eps) stem_shape();
+        }
+        // Cross-dowel hole (along X)
+        translate([0, 0, cross_pin_z - cross_pin_preload]) rotate([0, 90, 0])
+            cylinder(h = box_w + 2, d = cross_pin_dia + cross_pin_clearance, center = true, $fn = 24);
+    }
 }
 
 // Cavity for one part, lip down, lip face on the floor. Extended 1 mm above the
@@ -203,11 +227,15 @@ module base() {
         for (c = cavity_centres()) translate(c) {
             cavity();
             if (!integral_cores) {
+                // Plate pocket (with the ledge at its bottom) ...
+                translate([0, 0, floor_t - plate_t])
+                    linear_extrude(height = plate_t + eps) offset(delta = core_clearance) lip_face_shape();
+                // ... and stem hole through to the underside
                 translate([0, 0, -1])
-                    linear_extrude(height = floor_t + 2) offset(r = core_clearance) plug_shape();
-                translate([0, 0, -1])
-                    linear_extrude(height = core_flange_t + 1)
-                        offset(r = core_flange + core_clearance) plug_shape();
+                    linear_extrude(height = floor_t - plate_t + 1 + eps) offset(delta = core_clearance) stem_shape();
+                // Cross-dowel hole through the whole base
+                translate([0, 0, cross_pin_z]) rotate([0, 90, 0])
+                    cylinder(h = box_w + 2, d = cross_pin_dia + cross_pin_clearance, center = true, $fn = 24);
             }
         }
 
@@ -255,7 +283,13 @@ module all_cores() {
 
 module assembly(gap = 0) {
     color("SteelBlue", 0.9) base();
-    if (!integral_cores) color("Orange") translate([0, 0, -gap]) all_cores();
+    if (!integral_cores) {
+        color("Orange") translate([0, 0, -gap]) all_cores();
+        // Cross dowel(s), one per row
+        for (c = cavity_centres()) if (c[0] == cavity_centres()[0][0])
+            color("Tan") translate([-gap, c[1], cross_pin_z - gap]) rotate([0, 90, 0])
+                cylinder(h = box_w + 10, d = cross_pin_dia, center = true, $fn = 24);
+    }
     color("LightGrey", 0.6) translate([0, 0, base_h + gap]) lid();
     if (gap > 0)
         for (c = cavity_centres()) translate([c[0], c[1], base_h + lid_thickness + 2 * gap])
