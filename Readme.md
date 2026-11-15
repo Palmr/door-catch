@@ -29,3 +29,12 @@ Currently experimenting with standard grey resin.
 ## Rubber
 
 I've initially going to try [Polytek Poly PT Flex 60 Liquid Casting Rubber](https://www.mbfg.co.uk/pt-flex-60-rubber.html) with [Polytek Polycolor Polyurethane Black Dye](https://www.mbfg.co.uk/polytek_pigment.html) for the look and hopefully a bit of UV protection :crossed_fingers:
+
+## Licence
+
+[![CC BY 4.0](https://licensebuttons.net/l/by/4.0/88x31.png)](https://creativecommons.org/licenses/by/4.0/)
+
+This project is licensed under a
+[Creative Commons Attribution 4.0 International Licence](https://creativecommons.org/licenses/by/4.0/) by Nick Palmer.
+
+You are free to share and adapt the design, including commercially, as long as you give appropriate credit.
