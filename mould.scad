@@ -9,8 +9,11 @@
 //   - EJECTOR CORE PIN: the stud-shaped hole (funnel + collar + neck + mushroom head)
 //     is formed by a separate pin. Its top is a plate the exact size of the lip face,
 //     so it forms the whole floor of the lip pocket. Below the plate is a narrower
-//     stem that runs to the underside of the base. The step between plate and stem
-//     sits on a ledge, so the pin cannot drop, but it can be pushed UP.
+//     stem that runs to the underside of the base. A 45 deg chamfer between plate
+//     and stem sits in a matching seat, so the pin cannot drop, but it can be pushed
+//     UP. Print orientation: base upright on the plate; lid top-face-down on the
+//     plate; pin upright, supported only under the stem - no supports needed on
+//     any mould surface.
 //     A cross-dowel (cocktail stick / wire / printed pin) through the side of the
 //     base and the stem stops the pin floating while the rubber cures.
 //     To demould: lift the lid, pull the dowel, push the stem up from below - the
@@ -68,8 +71,11 @@ vent_inset       = 2.5; // Vent distance in from cavity edge
 
 integral_cores = false; // true = cores printed as part of the base (no pins)
 core_clearance = 0.08;  // Radial clearance of the pin in its hole in the base
-plate_t        = 3.0;   // Thickness of the lip-face plate on top of the pin
-stem_inset     = 2.0;   // Stem is this much smaller than the plate on each side (= ledge width)
+plate_t        = 2.0;   // Straight-sided part of the lip-face plate on top of the pin
+stem_inset     = 2.0;   // Stem is this much smaller than the plate on each side.
+                        // The step between them is a 45 deg chamfer (prints without
+                        // supports and self-centres the pin in its seat).
+stem_hole_chamfer = 0.5; // Lead-in chamfer at the bottom of the stem hole (absorbs elephant's foot)
 
 cross_pin_dia       = 2.0;  // MEASURE your dowel (cocktail stick / wire) and set this
 cross_pin_clearance = 0.2;  // Diametral clearance for the dowel
@@ -101,6 +107,7 @@ floor_t = mold_thickness;
 base_h  = floor_t + total_h;
 
 shaft_only_length = ball_shaft_length - ball_height;
+ledge_z = floor_t - plate_t - stem_inset;   // z where the 45 deg seat chamfer starts
 funnel_w = lip_width  * detent_lip_scale;
 funnel_l = lip_length * detent_lip_scale;
 
@@ -111,7 +118,8 @@ echo(str("Draft per side - body W: ", draft_deg(w, h), " deg, body L: ", draft_d
 echo(str("Rubber rim at lip face (W, L): ",
          (lip_width  * draft_scale - (funnel_w + 2 * ball_spacing)) / 2, " mm, ",
          (lip_length * draft_scale - (funnel_l + 2 * ball_spacing)) / 2, " mm"));
-echo(str("Pin ledge width: ", stem_inset, " mm, wall left above/below dowel in stem: ", floor_t - plate_t - cross_pin_z - (cross_pin_dia + cross_pin_clearance)/2, " / ", cross_pin_z - cross_pin_preload - (cross_pin_dia + cross_pin_clearance)/2, " mm"));
+echo(str("Stem above dowel hole to start of chamfer: ", ledge_z - cross_pin_z - (cross_pin_dia + cross_pin_clearance)/2,
+         " mm, stem below dowel hole: ", cross_pin_z - cross_pin_preload - (cross_pin_dia + cross_pin_clearance)/2, " mm"));
 echo(str("Rubber floor under stud tip: ", total_h - (ball_shaft_length + ball_spacing), " mm"));
 echo(str("Mould footprint: ", box_w, " x ", box_l, " mm, base height ", base_h,
          " mm, lid ", lid_thickness, " mm"));
@@ -194,6 +202,14 @@ module lip_face_shape() {
 module stem_shape() {
     offset(delta = -stem_inset) lip_face_shape();
 }
+// 45 deg transition from stem outline (at z0) to plate outline (at z0 + stem_inset),
+// with an extra outward offset c on both (for clearance in the base).
+module seat_chamfer(z0, c = 0) {
+    hull() {
+        translate([0, 0, z0]) linear_extrude(height = eps) offset(delta = c) stem_shape();
+        translate([0, 0, z0 + stem_inset - eps]) linear_extrude(height = eps) offset(delta = c) lip_face_shape();
+    }
+}
 
 // Ejector core pin, in the BASE frame of one cavity: z=floor_t is the cavity
 // floor, z=0 is the underside of the base.
@@ -203,7 +219,8 @@ module core_pin() {
             translate([0, 0, floor_t - eps]) ball_positive(ball_spacing);
             translate([0, 0, floor_t - plate_t])
                 linear_extrude(height = plate_t) lip_face_shape();
-            linear_extrude(height = floor_t - plate_t + eps) stem_shape();
+            seat_chamfer(ledge_z);
+            linear_extrude(height = ledge_z + eps) stem_shape();
         }
         // Cross-dowel hole (along X)
         translate([0, 0, cross_pin_z - cross_pin_preload]) rotate([0, 90, 0])
@@ -227,12 +244,21 @@ module base() {
         for (c = cavity_centres()) translate(c) {
             cavity();
             if (!integral_cores) {
-                // Plate pocket (with the ledge at its bottom) ...
-                translate([0, 0, floor_t - plate_t])
-                    linear_extrude(height = plate_t + eps) offset(delta = core_clearance) lip_face_shape();
-                // ... and stem hole through to the underside
+                // Plate pocket ...
+                translate([0, 0, floor_t - plate_t - eps])
+                    linear_extrude(height = plate_t + 2 * eps) offset(delta = core_clearance) lip_face_shape();
+                // ... 45 deg seat ...
+                seat_chamfer(ledge_z, core_clearance);
+                // ... stem hole through to the underside ...
                 translate([0, 0, -1])
-                    linear_extrude(height = floor_t - plate_t + 1 + eps) offset(delta = core_clearance) stem_shape();
+                    linear_extrude(height = ledge_z + 1 + eps) offset(delta = core_clearance) stem_shape();
+                // ... with a lead-in chamfer at the bottom
+                hull() {
+                    translate([0, 0, -1]) linear_extrude(height = 1)
+                        offset(delta = core_clearance + stem_hole_chamfer) stem_shape();
+                    translate([0, 0, stem_hole_chamfer]) linear_extrude(height = eps)
+                        offset(delta = core_clearance) stem_shape();
+                }
                 // Cross-dowel hole through the whole base
                 translate([0, 0, cross_pin_z]) rotate([0, 90, 0])
                     cylinder(h = box_w + 2, d = cross_pin_dia + cross_pin_clearance, center = true, $fn = 24);
