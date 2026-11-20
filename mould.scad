@@ -24,6 +24,7 @@
 
 /* [What to render] */
 show = "assembly"; // [part, base, lid, core, cores, assembly, exploded, section]
+with_rubber = true; // Show the part
 
 /* [Part dimensions] */
 outer_width  = 18.5;   // Base width of the rubber part
@@ -32,7 +33,8 @@ outer_height = 9.5;    // Height of the rubber part, not including lip
 
 // NOTE: this is a linear_extrude SCALE factor, not an angle (0.95 = top is 95% of base)
 draft_scale   = 0.95;
-corner_radius = 1.5;
+body_corner_radius = 3.0;  // Base body corners. Rough check on the original: about a 5 mm drill shank (r 2.5), sides also bulge, so rounded up
+lip_corner_radius  = 1.5;  // Lip corners - not yet measured
 
 lip_width  = 12.5;     // Width of the upper locating lip
 lip_length = 14.5;     // Length of the upper locating lip
@@ -57,7 +59,7 @@ mold_thickness = 8.0;   // Outer walls and floor
 cavity_gap     = 6.0;   // Wall between neighbouring cavities
 cols = 1;   // set 2 x 2 once the single-cavity design is dialled in
 rows = 1;
-lid_thickness  = 5.0;
+lid_thickness  = 6.0;   // 6 mm leaves room for the top-face grooves above the blind pin holes
 
 pin_dia        = 4.0;   // Alignment pin diameter
 key_pin_extra  = 1.0;   // One pin is this much bigger so the lid only fits one way
@@ -68,9 +70,14 @@ sprue_dia        = 3.5;
 sprue_funnel_dia = 8.0;
 vent_dia         = 1.5;
 vent_inset       = 2.5; // Vent distance in from cavity edge
+vent_countersink = 1.0; // 45 deg countersink depth on the lid's TOP face, so the
+                        // over-exposed burn-in layers (lid printed top-face-down)
+                        // can't close the vents. 0 = off.
 
 integral_cores = false; // true = cores printed as part of the base (no pins)
-core_clearance = 0.08;  // Radial clearance of the pin in its hole in the base
+core_clearance = 0.08;  // Radial clearance of the pin PLATE in its pocket (sets lip-face flash - keep tight)
+stem_clearance = 0.25;  // Radial clearance of the pin STEM in its hole. Doesn't seal anything,
+                        // so it can be loose - the plate and 45 deg seat do the locating.
 plate_t        = 2.0;   // Straight-sided part of the lip-face plate on top of the pin
 stem_inset     = 2.0;   // Stem is this much smaller than the plate on each side.
                         // The step between them is a 45 deg chamfer (prints without
@@ -84,6 +91,27 @@ cross_pin_z         = 2.5;  // Height of dowel centre above the base underside
 // value (e.g. 0.1) makes the dowel press the pin down onto its ledge (good with a
 // slightly compressible wooden stick). 0 = holes line up exactly.
 cross_pin_preload   = 0.0;
+
+/* [Print helpers - base underside] */
+bottom_grooves   = true; // Cross-hatch of grooves on the base underside: smaller solid
+                         // area in the first layers, resin escapes sideways, easier
+                         // to get off the build plate
+groove_w         = 1.0;
+groove_d         = 1.0;  // ~ burn-in + transition layers at 50 um
+groove_pitch     = 3.5;
+groove_keepout_margin = 0.5; // Min solid land between a hole and the nearest groove
+bottom_chamfer   = 0.5;  // 45 deg chamfer round the bottom outside edge (hides elephant's foot)
+
+/* [Print helpers - lid top face] */
+lid_grooves      = true; // Same groove grid on the lid's top face (the build-plate side)
+lid_groove_d     = 1.0;
+lid_top_chamfer  = 0.5;  // 45 deg chamfer round the lid's top outside edge (build-plate side)
+
+/* [Label] */
+label_text  = "R2";      // Debossed on the front (-Y) face of the base - bump per revision
+label_size  = 5;         // Cap height-ish, mm
+label_depth = 0.6;
+label_font  = "Liberation Sans:style=Bold";
 
 pry_slot_w = 10;
 pry_slot_d = 1.5;
@@ -107,7 +135,12 @@ floor_t = mold_thickness;
 base_h  = floor_t + total_h;
 
 shaft_only_length = ball_shaft_length - ball_height;
-ledge_z = floor_t - plate_t - stem_inset;   // z where the 45 deg seat chamfer starts
+ledge_z = floor_t - plate_t - stem_inset;   // z where the 45 deg seat chamfer starts (on the pin)
+// The seat cone in the base is the SAME cone as on the pin (zero clearance), so the
+// pin bottoms out with its top exactly flush with the cavity floor. Clearance is only
+// on the vertical walls. Carried down at 45 deg, the cone meets the looser stem hole
+// this far above ledge_z:
+seat_bottom_z = ledge_z + stem_clearance;
 funnel_w = lip_width  * detent_lip_scale;
 funnel_l = lip_length * detent_lip_scale;
 
@@ -120,6 +153,10 @@ echo(str("Rubber rim at lip face (W, L): ",
          (lip_length * draft_scale - (funnel_l + 2 * ball_spacing)) / 2, " mm"));
 echo(str("Stem above dowel hole to start of chamfer: ", ledge_z - cross_pin_z - (cross_pin_dia + cross_pin_clearance)/2,
          " mm, stem below dowel hole: ", cross_pin_z - cross_pin_preload - (cross_pin_dia + cross_pin_clearance)/2, " mm"));
+echo(str("Lid: material between blind pin holes and top-face grooves: ",
+         lid_thickness - (pin_height + 0.5) - (lid_grooves ? lid_groove_d : 0), " mm"));
+assert(lid_thickness - (pin_height + 0.5) - (lid_grooves ? lid_groove_d : 0) >= 0.4,
+       "Lid too thin: grooves would break into the alignment-pin holes");
 echo(str("Rubber floor under stud tip: ", total_h - (ball_shaft_length + ball_spacing), " mm"));
 echo(str("Mould footprint: ", box_w, " x ", box_l, " mm, base height ", base_h,
          " mm, lid ", lid_thickness, " mm"));
@@ -142,13 +179,45 @@ function pin_positions() = [
 ];
 function pin_d(k) = k == 0 ? pin_dia + key_pin_extra : pin_dia;
 
+// Cross-hatch grid of grooves cut UP from z=0 to z=depth, open at all four edges.
+// Groove centre-lines sit on multiples of groove_pitch.
+// keepouts = list of [cx, cy, hx, hy]: a hole centred at (cx, cy) with half-extents
+// hx, hy. No groove is cut inside the grid block(s) that contain the hole plus
+// groove_keepout_margin, so each hole sits in one whole block - no slivers.
+module groove_grid(sx, sy, depth, keepouts = []) {
+    difference() {
+        union() {
+            for (x = [-floor(sx / 2 / groove_pitch) * groove_pitch : groove_pitch : sx / 2])
+                translate([x - groove_w / 2, -sy / 2 - 1, -1]) cube([groove_w, sy + 2, depth + 1]);
+            for (y = [-floor(sy / 2 / groove_pitch) * groove_pitch : groove_pitch : sy / 2])
+                translate([-sx / 2 - 1, y - groove_w / 2, -1]) cube([sx + 2, groove_w, depth + 1]);
+        }
+        for (k = keepouts) {
+            m  = groove_keepout_margin;
+            x0 = floor((k[0] - k[2] - m) / groove_pitch) * groove_pitch + groove_w / 2;
+            x1 = ceil ((k[0] + k[2] + m) / groove_pitch) * groove_pitch - groove_w / 2;
+            y0 = floor((k[1] - k[3] - m) / groove_pitch) * groove_pitch + groove_w / 2;
+            y1 = ceil ((k[1] + k[3] + m) / groove_pitch) * groove_pitch - groove_w / 2;
+            translate([x0, y0, -2]) cube([x1 - x0, y1 - y0, depth + 3]);
+        }
+    }
+}
+
+// Box centred in X/Y, z from 0 to ht, with a 45 deg chamfer c round the z=0 edge
+module chamfered_box(sx, sy, ht, c) {
+    hull() {
+        translate([-sx / 2 + c, -sy / 2 + c, 0]) cube([sx - 2 * c, sy - 2 * c, eps]);
+        translate([-sx / 2, -sy / 2, c]) cube([sx, sy, ht - c]);
+    }
+}
+
 // ---- Part geometry (part's own frame: base face at z=0, lip face at z=total_h) ----
 module part_positive() {
     linear_extrude(height = h, scale = draft_scale)
-        rrect(w, l, corner_radius);
+        rrect(w, l, body_corner_radius);
     translate([0, 0, h])
         linear_extrude(height = lip_height, scale = draft_scale)
-            rrect(lip_width, lip_length, corner_radius);
+            rrect(lip_width, lip_length, lip_corner_radius);
 }
 
 // Stud-shaped hole. z=0 at the lip face, +z goes into the part.
@@ -197,7 +266,7 @@ module part() {
 // ---- Mould ----
 // Outline of the lip face (the narrow end of the lip pocket, on the cavity floor)
 module lip_face_shape() {
-    scale([draft_scale, draft_scale]) rrect(lip_width, lip_length, corner_radius);
+    scale([draft_scale, draft_scale]) rrect(lip_width, lip_length, lip_corner_radius);
 }
 module stem_shape() {
     offset(delta = -stem_inset) lip_face_shape();
@@ -214,6 +283,7 @@ module seat_chamfer(z0, c = 0) {
 // Ejector core pin, in the BASE frame of one cavity: z=floor_t is the cavity
 // floor, z=0 is the underside of the base.
 module core_pin() {
+    color("Orange")
     difference() {
         union() {
             translate([0, 0, floor_t - eps]) ball_positive(ball_spacing);
@@ -233,13 +303,40 @@ module core_pin() {
 module cavity() {
     translate([0, 0, floor_t + total_h]) mirror([0, 0, 1]) {
         part_positive();
-        translate([0, 0, -1]) linear_extrude(height = 1 + eps) rrect(w, l, corner_radius);
+        translate([0, 0, -1]) linear_extrude(height = 1 + eps) rrect(w, l, body_corner_radius);
+        // Lip pocket grown by core_clearance so its bottom edge lines up exactly with
+        // the plate pocket below (no ledge for the ejector plate to catch on).
+        // Dividing by draft_scale makes the growth exactly core_clearance at the floor.
+        if (!integral_cores)
+            translate([0, 0, h])
+                linear_extrude(height = lip_height + eps, scale = draft_scale)
+                    offset(delta = core_clearance / draft_scale)
+                        rrect(lip_width, lip_length, lip_corner_radius);
     }
 }
 
 module base() {
+    color("SteelBlue")
     difference() {
-        translate([-box_w / 2, -box_l / 2, 0]) cube([box_w, box_l, base_h]);
+        // Outer block with a chamfered bottom edge
+        chamfered_box(box_w, box_l, base_h, bottom_chamfer);
+
+        // Underside grooves, open at all four edges
+        if (bottom_grooves)
+            groove_grid(box_w, box_l, groove_d, integral_cores ? [] : [
+                for (c = cavity_centres()) [c[0], c[1],
+                    (lip_width  * draft_scale) / 2 - stem_inset + stem_clearance + stem_hole_chamfer,
+                    (lip_length * draft_scale) / 2 - stem_inset + stem_clearance + stem_hole_chamfer]
+            ]);
+
+        // Revision label, debossed into the front (-Y) face, centred on the
+        // solid band between the grooves and the pry slot
+        if (label_text != "")
+            translate([0, -box_l / 2 - eps, (groove_d + base_h - 2) / 2])
+                rotate([90, 0, 0]) mirror([0, 0, 1])
+                    linear_extrude(height = label_depth + eps)
+                        text(label_text, size = label_size, font = label_font,
+                             halign = "center", valign = "center");
 
         for (c = cavity_centres()) translate(c) {
             cavity();
@@ -247,17 +344,23 @@ module base() {
                 // Plate pocket ...
                 translate([0, 0, floor_t - plate_t - eps])
                     linear_extrude(height = plate_t + 2 * eps) offset(delta = core_clearance) lip_face_shape();
-                // ... 45 deg seat ...
-                seat_chamfer(ledge_z, core_clearance);
+                // ... 45 deg seat: same cone as the pin, ending where it meets the
+                // looser stem hole (no step there) ...
+                hull() {
+                    translate([0, 0, seat_bottom_z]) linear_extrude(height = eps)
+                        offset(delta = stem_clearance) stem_shape();
+                    translate([0, 0, ledge_z + stem_inset - eps]) linear_extrude(height = eps)
+                        lip_face_shape();
+                }
                 // ... stem hole through to the underside ...
                 translate([0, 0, -1])
-                    linear_extrude(height = ledge_z + 1 + eps) offset(delta = core_clearance) stem_shape();
+                    linear_extrude(height = seat_bottom_z + 1 + eps) offset(delta = stem_clearance) stem_shape();
                 // ... with a lead-in chamfer at the bottom
                 hull() {
                     translate([0, 0, -1]) linear_extrude(height = 1)
-                        offset(delta = core_clearance + stem_hole_chamfer) stem_shape();
+                        offset(delta = stem_clearance + stem_hole_chamfer) stem_shape();
                     translate([0, 0, stem_hole_chamfer]) linear_extrude(height = eps)
-                        offset(delta = core_clearance) stem_shape();
+                        offset(delta = stem_clearance) stem_shape();
                 }
                 // Cross-dowel hole through the whole base
                 translate([0, 0, cross_pin_z]) rotate([0, 90, 0])
@@ -284,8 +387,21 @@ module base() {
 
 // Lid, in its own frame: underside (mould face) at z=0.
 module lid() {
+    color("Gainsboro")
     difference() {
-        translate([-box_w / 2, -box_l / 2, 0]) cube([box_w, box_l, lid_thickness]);
+        // Plate with a chamfered TOP edge (top face goes on the build plate)
+        translate([0, 0, lid_thickness]) mirror([0, 0, 1])
+            chamfered_box(box_w, box_l, lid_thickness, lid_top_chamfer);
+
+        // Top-face grooves (build-plate side)
+        if (lid_grooves)
+            translate([0, 0, lid_thickness]) mirror([0, 0, 1])
+                groove_grid(box_w, box_l, lid_groove_d, concat(
+                    [for (c = cavity_centres()) [c[0], c[1], sprue_funnel_dia / 2, sprue_funnel_dia / 2]],
+                    [for (c = cavity_centres(), s = [-1, 1])
+                        let(r = vent_dia / 2 + vent_countersink)
+                        [c[0] + s * (w / 2 - vent_inset), c[1] + s * (l / 2 - vent_inset), r, r]]
+                ));
 
         for (c = cavity_centres()) translate(c) {
             // Sprue + 45 deg pour funnel
@@ -296,6 +412,10 @@ module lid() {
             for (s = [-1, 1])
                 translate([s * (w / 2 - vent_inset), s * (l / 2 - vent_inset), -1])
                     cylinder(h = lid_thickness + 2, d = vent_dia);
+            if (vent_countersink > 0)
+                for (s = [-1, 1])
+                    translate([s * (w / 2 - vent_inset), s * (l / 2 - vent_inset), lid_thickness - vent_countersink])
+                        cylinder(h = vent_countersink + eps, d1 = vent_dia, d2 = vent_dia + 2 * vent_countersink);
         }
 
         for (k = [0 : 3]) translate([pin_positions()[k][0], pin_positions()[k][1], -1])
@@ -316,10 +436,15 @@ module assembly(gap = 0) {
             color("Tan") translate([-gap, c[1], cross_pin_z - gap]) rotate([0, 90, 0])
                 cylinder(h = box_w + 10, d = cross_pin_dia, center = true, $fn = 24);
     }
-    color("LightGrey", 0.6) translate([0, 0, base_h + gap]) lid();
+    color("Gainsboro", 0.6) translate([0, 0, base_h + gap]) lid();
+    if (with_rubber)
     if (gap > 0)
         for (c = cavity_centres()) translate([c[0], c[1], base_h + lid_thickness + 2 * gap])
             color("DimGray") part();
+}
+
+module cut() {   // keep the half with y <= 0
+    translate([-box_w, -box_l, -50]) cube([2 * box_w, box_l, 200]);
 }
 
 // ---- Output ----
@@ -330,8 +455,17 @@ else if (show == "core")     core_pin();
 else if (show == "cores")    all_cores();
 else if (show == "assembly") assembly(0);
 else if (show == "exploded") assembly(explode);
-else if (show == "section")
-    difference() {
-        assembly(0);
-        translate([-box_w, cavity_centres()[0][1], -50]) cube([2 * box_w, box_l, 200]);
+else if (show == "section") {
+    color("SteelBlue")  render() intersection() { base(); cut(); }
+    color("Orange")     render() intersection() { core_pin(); cut(); }
+    color("Gainsboro")  render() intersection() { translate([0, 0, base_h]) lid(); cut(); }
+    color("Tan")        render() intersection() {
+        translate([0, 0, cross_pin_z]) rotate([0, 90, 0]) cylinder(h = box_w + 10, d = cross_pin_dia, center = true, $fn = 24);
+        cut();
     }
+    if (with_rubber)
+        color("DimGray") render() intersection() {
+            translate([0, 0, floor_t + total_h]) mirror([0, 0, 1]) part();
+            cut();
+        }
+}
