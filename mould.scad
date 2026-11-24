@@ -23,7 +23,7 @@
 //     lid down so the excess bleeds out of the holes.
 
 /* [What to render] */
-show = "assembly"; // [part, base, lid, core, cores, assembly, exploded, section]
+show = "assembly"; // [part, base, lid, core, cores, assembly, exploded, section, print]
 with_rubber = true; // Show the part
 
 /* [Part dimensions] */
@@ -127,7 +127,7 @@ lid_drain_w = 2.0;   // wide/deep enough that over-exposed burn-in layers can't 
 lid_drain_d = 1.0;  // 45 deg chamfer round the lid's top outside edge (build-plate side)
 
 /* [Label] */
-label_text  = "R3";      // Debossed on the front (-Y) face of the base - bump per revision
+label_text  = "R2";      // Debossed on the front (-Y) face of the base - bump per revision
 label_size  = 5;         // Cap height-ish, mm
 label_depth = 0.6;
 label_font  = "Liberation Sans:style=Bold";
@@ -136,6 +136,18 @@ pry_slot_w = 10;
 pry_slot_d = 1.5;
 
 explode = 25;
+
+/* [Print layout] */
+// show = "print": base, lid and core laid out on the build plate in print orientation
+// (base upright, lid TOP-FACE-DOWN, core upright). Export it as one STL for the slicer:
+//   openscad -D 'show="print"' -o plate.stl mould.scad
+print_gap = 10;          // gap between parts on the plate
+// Overlay suction cups found by cupcheck.py (red). Generate the file first:
+//   python3 cupcheck.py plate.stl --stl-out cups.stl
+// OpenSCAD can't do this check itself: booleans can't tell a sealed pocket from one
+// that connects to open resin. Stale if the model has changed since cups.stl was made.
+show_cups = false;
+cups_file = "cups.stl";
 
 /* [Hidden] */
 $fn = 48;
@@ -497,6 +509,20 @@ module cut() {   // keep the half with y <= 0
     translate([-box_w, -box_l, -50]) cube([2 * box_w, box_l, 200]);
 }
 
+// All three printable parts, oriented and spaced for the build plate (z=0 = plate)
+module print_layout() {
+    core_w = lip_width * draft_scale;
+    span   = box_w + print_gap + box_w + print_gap + core_w;
+    x0     = -span / 2;
+    translate([x0 + box_w / 2, 0, 0]) base();
+    // Lid flipped by ROTATING 180 deg about X (a mirror would make the left-handed twin)
+    translate([x0 + box_w + print_gap + box_w / 2, 0, lid_thickness]) rotate([180, 0, 0]) lid();
+    if (!integral_cores)
+        for (i = [0 : len(cavity_centres()) - 1])
+            translate([x0 + 2 * box_w + 2 * print_gap + core_w / 2, i * (lip_length * draft_scale + print_gap), 0])
+                core_pin();
+}
+
 // ---- Output ----
 if (show == "part")          part();
 else if (show == "base")     base();
@@ -505,6 +531,10 @@ else if (show == "core")     core_pin();
 else if (show == "cores")    all_cores();
 else if (show == "assembly") assembly(0);
 else if (show == "exploded") assembly(explode);
+else if (show == "print") {
+    print_layout();
+    if (show_cups) color("Red") import(cups_file);
+}
 else if (show == "section") {
     color("SteelBlue")  render() intersection() { base(); cut(); }
     color("Orange")     render() intersection() { core_pin(); cut(); }
