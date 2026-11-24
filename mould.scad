@@ -59,9 +59,10 @@ mold_thickness = 8.0;   // Outer walls and floor
 cavity_gap     = 6.0;   // Wall between neighbouring cavities
 cols = 1;   // set 2 x 2 once the single-cavity design is dialled in
 rows = 1;
-lid_thickness  = 6.0;   // 6 mm leaves room for the top-face grooves above the blind pin holes
+lid_thickness  = 5.0;   // 6 if lid_grooves is on (room for grooves above the blind pin holes)
 
 pin_dia        = 4.0;   // Alignment pin diameter
+pin_inset      = 5.0;   // Pin centre distance in from the outside edges (was mold_thickness/2 = 4)
 key_pin_extra  = 1.0;   // One pin is this much bigger so the lid only fits one way
 pin_height     = 4.0;
 pin_clearance  = 0.2;   // Diametral clearance in lid holes
@@ -93,22 +94,40 @@ cross_pin_z         = 2.5;  // Height of dowel centre above the base underside
 cross_pin_preload   = 0.0;
 
 /* [Print helpers - base underside] */
-bottom_grooves   = true; // Cross-hatch of grooves on the base underside: smaller solid
+// R1 test print: the grids FAILED on both base and lid - the full cross-section above
+// the grid (at groove_d) was only held by the island tops and tore off. Off by default.
+bottom_grooves   = false; // Cross-hatch of grooves on the base underside: smaller solid
                          // area in the first layers, resin escapes sideways, easier
                          // to get off the build plate
 groove_w         = 1.0;
 groove_d         = 1.0;  // ~ burn-in + transition layers at 50 um
 groove_pitch     = 3.5;
 groove_keepout_margin = 0.5; // Min solid land between a hole and the nearest groove
+
+// Drain channels on the base underside: run from the stem hole out to the front and
+// back faces, so the stem hole is never a pocket sealed against the build plate
+// (suction cup). The cross-dowel hole also vents it, a few mm up.
+drain_channels  = true;
+drain_w         = 2.0;
+drain_d         = 1.0;
 bottom_chamfer   = 0.5;  // 45 deg chamfer round the bottom outside edge (hides elephant's foot)
 
 /* [Print helpers - lid top face] */
-lid_grooves      = true; // Same groove grid on the lid's top face (the build-plate side)
+lid_grooves      = false; // Same groove grid on the lid's top face (see R1 note above)
 lid_groove_d     = 1.0;
-lid_top_chamfer  = 0.5;  // 45 deg chamfer round the lid's top outside edge (build-plate side)
+lid_top_chamfer  = 0.5;
+// Pin sockets right through the lid, so they're never blind pockets (suction cups)
+// whichever way up the lid is printed.
+pin_sockets_through = true;
+// Drain channels on the lid's TOP face (build-plate side): a short channel from every
+// hole that reaches that face (sprue funnel, vents, pin sockets) out to the nearest
+// side edge. Needed if the lid is printed flat on the plate; harmless on supports.
+lid_drain_channels = true;
+lid_drain_w = 2.0;   // wide/deep enough that over-exposed burn-in layers can't close them
+lid_drain_d = 1.0;  // 45 deg chamfer round the lid's top outside edge (build-plate side)
 
 /* [Label] */
-label_text  = "R2";      // Debossed on the front (-Y) face of the base - bump per revision
+label_text  = "R3";      // Debossed on the front (-Y) face of the base - bump per revision
 label_size  = 5;         // Cap height-ish, mm
 label_depth = 0.6;
 label_font  = "Liberation Sans:style=Bold";
@@ -153,10 +172,18 @@ echo(str("Rubber rim at lip face (W, L): ",
          (lip_length * draft_scale - (funnel_l + 2 * ball_spacing)) / 2, " mm"));
 echo(str("Stem above dowel hole to start of chamfer: ", ledge_z - cross_pin_z - (cross_pin_dia + cross_pin_clearance)/2,
          " mm, stem below dowel hole: ", cross_pin_z - cross_pin_preload - (cross_pin_dia + cross_pin_clearance)/2, " mm"));
-echo(str("Lid: material between blind pin holes and top-face grooves: ",
-         lid_thickness - (pin_height + 0.5) - (lid_grooves ? lid_groove_d : 0), " mm"));
-assert(lid_thickness - (pin_height + 0.5) - (lid_grooves ? lid_groove_d : 0) >= 0.4,
-       "Lid too thin: grooves would break into the alignment-pin holes");
+if (!pin_sockets_through) {
+    echo(str("Lid: material between blind pin holes and top face: ",
+             lid_thickness - (pin_height + 0.5) - (lid_grooves ? lid_groove_d : 0), " mm"));
+    assert(lid_thickness - (pin_height + 0.5) - (lid_grooves ? lid_groove_d : 0) >= 0.4,
+           "Lid too thin: top face would break into the blind alignment-pin holes");
+}
+echo(str("Lid wall between pin socket and outside edge: ",
+         pin_inset - (pin_dia + pin_clearance) / 2, " mm (key pin: ",
+         pin_inset - (pin_dia + key_pin_extra + pin_clearance) / 2, " mm)"));
+// Nearest cavity point to a pin: cavity corner arc centre is (mold_thickness + r) in from both edges
+echo(str("Base: gap between key pin and cavity corner: ",
+         sqrt(2) * (mold_thickness + body_corner_radius - pin_inset) - body_corner_radius - (pin_dia + key_pin_extra) / 2, " mm"));
 echo(str("Rubber floor under stud tip: ", total_h - (ball_shaft_length + ball_spacing), " mm"));
 echo(str("Mould footprint: ", box_w, " x ", box_l, " mm, base height ", base_h,
          " mm, lid ", lid_thickness, " mm"));
@@ -172,10 +199,10 @@ function cavity_centres() = [
 ];
 
 function pin_positions() = [
-    [ box_w / 2 - mold_thickness / 2,  box_l / 2 - mold_thickness / 2],
-    [-box_w / 2 + mold_thickness / 2,  box_l / 2 - mold_thickness / 2],
-    [-box_w / 2 + mold_thickness / 2, -box_l / 2 + mold_thickness / 2],
-    [ box_w / 2 - mold_thickness / 2, -box_l / 2 + mold_thickness / 2]
+    [ box_w / 2 - pin_inset,  box_l / 2 - pin_inset],
+    [-box_w / 2 + pin_inset,  box_l / 2 - pin_inset],
+    [-box_w / 2 + pin_inset, -box_l / 2 + pin_inset],
+    [ box_w / 2 - pin_inset, -box_l / 2 + pin_inset]
 ];
 function pin_d(k) = k == 0 ? pin_dia + key_pin_extra : pin_dia;
 
@@ -329,6 +356,12 @@ module base() {
                     (lip_length * draft_scale) / 2 - stem_inset + stem_clearance + stem_hole_chamfer]
             ]);
 
+        // Drain channels from each stem hole to the front and back faces
+        if (drain_channels && !integral_cores)
+            for (c = cavity_centres())
+                translate([c[0] - drain_w / 2, -box_l / 2 - 1, -1])
+                    cube([drain_w, box_l + 2, drain_d + 1]);
+
         // Revision label, debossed into the front (-Y) face, centred on the
         // solid band between the grooves and the pry slot
         if (label_text != "")
@@ -419,7 +452,24 @@ module lid() {
         }
 
         for (k = [0 : 3]) translate([pin_positions()[k][0], pin_positions()[k][1], -1])
-            cylinder(h = pin_height + 1.5, d = pin_d(k) + pin_clearance);
+            cylinder(h = pin_sockets_through ? lid_thickness + 2 : pin_height + 1.5,
+                     d = pin_d(k) + pin_clearance);
+
+        // Drain channels on the top face: hole centre -> nearest side (+/-X) edge
+        if (lid_drain_channels) {
+            holes = concat(
+                [for (c = cavity_centres()) [c[0], c[1]]],
+                [for (c = cavity_centres(), s = [-1, 1]) [c[0] + s * (w / 2 - vent_inset), c[1] + s * (l / 2 - vent_inset)]],
+                pin_sockets_through ? pin_positions() : []
+            );
+            for (hc = holes) {
+                dir = hc[0] >= 0 ? 1 : -1;
+                x0  = dir > 0 ? hc[0] : -box_w / 2 - 1;
+                x1  = dir > 0 ?  box_w / 2 + 1 : hc[0];
+                translate([x0, hc[1] - lid_drain_w / 2, lid_thickness - lid_drain_d])
+                    cube([x1 - x0, lid_drain_w, lid_drain_d + 1]);
+            }
+        }
     }
 }
 
